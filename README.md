@@ -43,7 +43,7 @@ Indikator ini menggabungkan beberapa konsep yang paling banyak dipakai dan diaja
 | **Trigger** | EMA 9 memotong EMA 21, **atau** harga *pullback* menyentuh EMA 9 lalu memantul dengan candle searah tren | Teknik "beli saat koreksi dalam tren naik", bukan mengejar harga |
 | **Momentum** | RSI > 50 untuk BUY (tapi < 70), RSI < 50 untuk SELL (tapi > 30) | RSI dan ATR diciptakan J. Welles Wilder (*New Concepts in Technical Trading Systems*, 1978) |
 | **Volatilitas** | Tidak ada sinyal saat ATR jauh di bawah rata-ratanya (pasar sepi) | Scalping butuh pergerakan. Pasar yang "mati" biasanya menghasilkan sinyal palsu |
-| **Risiko** | SL = 1,5 × ATR, TP = 1,5 × jarak SL | SL mengikuti volatilitas pasar, dan target keuntungan selalu lebih besar dari risiko |
+| **Risiko** | SL = 2 × ATR, TP = 1,5 × jarak SL | SL mengikuti volatilitas pasar, dan target keuntungan selalu lebih besar dari risiko |
 
 ### Tentang "strategi para juara dunia"
 
@@ -62,11 +62,35 @@ Yang **konsisten mereka ajarkan** justru prinsip-prinsip berikut, dan indikator 
 | Pasar | Timeframe | Saran pengaturan |
 |---|---|---|
 | Forex (EURUSD, GBPUSD) | 5 menit | Aktifkan **filter sesi** (14:00–23:00 WIB, sesi London + New York). Filter VWAP tetap aktif, tapi otomatis diabaikan jika broker tidak menyediakan volume |
-| Emas (XAUUSD) | 5 menit | Aktifkan filter sesi. SL bisa dinaikkan ke 2 × ATR karena emas sangat volatil |
+| Emas (XAUUSD) | 5 menit | Sudah menjadi pengaturan bawaan: filter sesi aktif dan SL = 2 × ATR karena emas sangat volatil. Lihat panduan khusus di bawah |
 | Crypto (BTCUSDT, ETHUSDT) | 1–5 menit | Aktifkan **filter volume**. Filter sesi opsional karena pasar buka 24 jam |
 | Saham IDX | 5 menit | Ubah jam sesi ke `0900-1600` |
 
 Mulailah dari timeframe **5 menit**. Timeframe 1 menit menghasilkan lebih banyak sinyal palsu dan lebih sulit untuk pemula.
+
+> Pengaturan bawaan indikator ini sudah disesuaikan untuk **emas (XAUUSD)**: filter sesi aktif (14:00–23:00 WIB) dan SL = 2 × ATR. Untuk pasar lain, ubah lewat ikon ⚙️ (Settings) indikator.
+
+### Panduan khusus emas (XAUUSD)
+
+**Simbol chart.** Pakai simbol dari broker Anda, atau `OANDA:XAUUSD`. Simbol OANDA menyediakan data *tick volume*, sehingga filter VWAP bisa bekerja.
+
+**Jam terbaik (WIB).** Emas paling aktif saat sesi London dan New York berjalan:
+
+| Waktu (WIB) | Kondisi |
+|---|---|
+| 06:00 – 14:00 | Sesi Asia. Biasanya sepi dan bergerak menyamping, lebih baik **tidak scalping** |
+| 14:00 – 15:00 | London dibuka (14:00 saat musim panas Eropa, 15:00 saat musim dingin). Pergerakan mulai kencang |
+| 19:30 – 23:00 | Sesi New York dan London berjalan bersamaan. **Paling ramai dan paling bergerak** |
+| setelah 23:00 | Aktivitas menurun |
+
+**Hindari jam berita besar.** Emas bisa bergerak puluhan dolar dalam hitungan detik saat rilis data ekonomi Amerika, dan SL bisa terlewati (*slippage*). Cek jadwalnya di kalender ekonomi (misalnya Forex Factory atau Investing.com, cari berita berlabel merah). Jangan membuka posisi mulai 15 menit sebelum hingga 15 menit sesudah rilis:
+- **NFP** (data tenaga kerja): Jumat pertama setiap bulan, pukul 19:30 WIB (20:30 WIB saat musim dingin di AS)
+- **CPI** (inflasi): sekitar pertengahan bulan, pada jam yang sama
+- **FOMC** (keputusan suku bunga The Fed): sekitar 01:00 WIB, sudah di luar jam sesi indikator
+
+**Hitung spread saat backtest.** Spread emas cukup besar, dan tanpa spread hasil backtest akan terlihat lebih bagus dari kenyataan. Di versi strategy, buka ⚙️ → tab **Properties** → isi **Slippage** sesuai spread broker Anda dalam satuan *tick*. Contohnya, jika harga emas memakai 2 desimal dan spread broker sekitar $0,30, isi 30 tick.
+
+**Ukuran lot dan risiko.** Pada lot 0,01, setiap pergerakan $1 pada harga emas bernilai sekitar $1. Karena SL = 2 × ATR, jarak SL berubah-ubah mengikuti kondisi pasar. Selalu hitung lot dari jarak SL agar kerugian maksimal tetap ≤ 1% modal. Contoh: modal $500, risiko 1% = $5. Jika jarak SL $5, pakai lot 0,01. Jika jarak SL $10, jangan masuk dengan lot 0,01 karena risikonya menjadi 2% modal.
 
 ## 5. Langkah aman sebelum memakai uang sungguhan
 
