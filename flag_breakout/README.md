@@ -103,4 +103,43 @@ Nama parameter untuk `--set` ada di kelas `Params` di bagian atas script, misaln
 
 ## 4. Hasil backtest
 
-HASIL_BACKTEST_PLACEHOLDER
+Data: XAUUSD M5 Dukascopy (BID), **4 Januari 2021 – 26 September 2026** (±391 ribu candle M5). Spread $0,30/oz, risiko 1% per posisi, modal awal $1.000.
+
+### Parameter bawaan
+| Metrik | Hasil |
+|---|---|
+| Jumlah transaksi | 160 (±2,3 per bulan) |
+| Win rate | 25,0% |
+| Rata-rata menang / kalah | +0,77R / −0,40R |
+| **Ekspektansi** | **−0,105R per transaksi** |
+| Profit factor | 0,65 |
+| Kalah beruntun terpanjang | 13 kali |
+| Max drawdown | −14,4% |
+| Modal akhir | $876,95 (−12,3%) |
+
+Alasan keluar: 112 dari 160 posisi (70%) ditutup karena **breakout gagal** (harga kembali ke dalam kotak), rata-rata −0,38R. Hanya 12 posisi mencapai TP2.
+
+### Variasi parameter
+| Variasi | Transaksi | Win rate | Ekspektansi | Profit factor |
+|---|---|---|---|---|
+| Bawaan | 160 | 25,0% | −0,105R | 0,65 |
+| Tanpa keluar saat breakout gagal | 155 | 42,6% | −0,117R | 0,72 |
+| Koreksi maks 61,8% | 315 | 26,7% | −0,084R | 0,73 |
+| Impuls 1,5 × ATR | 167 | 25,1% | −0,102R | 0,66 |
+| Longgar (impuls 1,5 ATR, koreksi 61,8%, konsolidasi ≤ 25) | 333 | 26,7% | −0,083R | 0,73 |
+| Longgar + TP2 3R | 333 | 26,7% | −0,083R | 0,73 |
+| Longgar, **spread $0** (tidak realistis) | 357 | 29,4% | +0,008R | 1,03 |
+
+### Kesimpulan
+- **Tidak ada variasi yang untung setelah spread.** Bahkan tanpa spread sama sekali, hasilnya hanya impas. Artinya pola ini, sebagaimana didefinisikan di sini, **tidak punya keunggulan (edge)** pada XAUUSD M5 selama 2021–2026.
+- Masalah utamanya: **sebagian besar breakout di M5 gagal**. Mengganti target TP atau melonggarkan syarat pola tidak mengubah hal ini.
+- Hasil ini tidak membuktikan bahwa video tersebut salah. Penjelasan di video bersifat diskresioner (penilaian mata), sedangkan backtest ini menguji **satu versi aturan yang tertulis**. Namun jika aturan pola tidak bisa ditulis dengan jelas, klaim keberhasilannya juga tidak bisa diuji.
+
+### Ide untuk diuji selanjutnya (belum terbukti)
+- Entry di **retest** batas kotak setelah breakout, bukan langsung setelah candle breakout.
+- Time frame lebih besar (pola di M15, tren di H1/H4), yang biasanya lebih tahan terhadap spread.
+- Filter volatilitas (hanya trading saat ATR di atas rata-rata) atau hanya sesi New York.
+
+Setiap perubahan sebaiknya diuji di **sebagian data** (misalnya 2021–2024), lalu dikonfirmasi di **data yang belum pernah dipakai** (2025–2026). Mencoba banyak kombinasi pada data yang sama lalu memilih yang terbaik hampir pasti menghasilkan strategi yang tampak bagus di masa lalu tetapi gagal di masa depan (*overfitting*).
+
+*Materi edukasi, bukan nasihat keuangan.*
