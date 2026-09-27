@@ -1,0 +1,275 @@
+//@version=5
+// Flag Breakout XAU — tren M30 (EMA 50), pola flag/kotak & entry di M5.
+// Aturan identik dengan backtest_flag_breakout.py:
+//   Arah   : close M30 terakhir yang sudah selesai di atas EMA50 dan EMA50 > EMA50[10] -> hanya BUY (kebalikannya SELL)
+//   Pola   : impuls >= 2 x ATR dalam <= 6 candle, lalu konsolidasi 4-15 candle, koreksi <= 50% impuls
+//   Entry  : candle ditutup di luar kotak, badan >= 50%, panjang <= 1,5 x ATR -> masuk di open candle berikutnya
+//   SL/TP  : SL sisi kotak seberang + 0,3 x ATR (lewati bila > 2,5 x ATR), TP1 = 1R (tutup 50%, SL ke BE), TP2 = 2R
+//   Keluar : close kembali ke dalam kotak / TP1 belum kena setelah 12 candle / sisa posisi maks 48 candle
+// Pasang di chart XAUUSD time frame 5 menit. Sinyal hanya dihitung saat candle selesai (non-repaint).
+indicator("Flag Breakout XAU", shorttitle="FlagBO XAU", overlay=true, max_bars_back=200, max_boxes_count=300, max_lines_count=500, max_labels_count=500)
+
+// ============================== INPUT ==============================
+grpT = "1. Arah tren"
+trendTf  = input.timeframe("30", "Time frame tren", group=grpT)
+emaLen   = input.int(50, "Panjang EMA", minval=1, group=grpT)
+slopeLb  = input.int(10, "EMA dibanding N candle sebelumnya", minval=1, group=grpT)
+showEma  = input.bool(true, "Tampilkan EMA tren", group=grpT)
+
+grpP = "2. Pola flag / kotak"
+atrLen     = input.int(14, "Panjang ATR", minval=1, group=grpP)
+impMult    = input.float(2.0, "Impuls minimal (x ATR)", minval=0.1, step=0.1, group=grpP)
+impMaxBars = input.int(6, "Impuls maksimal (candle)", minval=1, maxval=20, group=grpP)
+consMin    = input.int(4, "Konsolidasi minimal (candle)", minval=2, group=grpP)
+consMax    = input.int(15, "Konsolidasi maksimal (candle)", minval=1, maxval=60, group=grpP)
+maxRetr    = input.float(0.5, "Koreksi maksimal (bagian dari impuls)", minval=0.1, maxval=1.0, step=0.05, group=grpP)
+
+grpE = "3. Entry"
+bodyMin  = input.float(0.5, "Badan candle breakout minimal (bagian dari panjang candle)", minval=0.0, maxval=1.0, step=0.05, group=grpE)
+maxBoAtr = input.float(1.5, "Panjang candle breakout maksimal (x ATR)", minval=0.1, step=0.1, group=grpE)
+useSess  = input.bool(true, "Hanya di jam sesi", group=grpE)
+sessStr  = input.string("1400-1700,1930-2300", "Jam sesi", group=grpE, tooltip="Format HHMM-HHMM, pisahkan dengan koma. Default: London 14:00-17:00 dan London+New York 19:30-23:00 WIB.")
+sessTz   = input.string("Asia/Jakarta", "Zona waktu sesi", group=grpE)
+
+grpR = "4. SL / TP / keluar"
+slBuf      = input.float(0.3, "Buffer SL (x ATR)", minval=0.0, step=0.05, group=grpR)
+maxSlAtr   = input.float(2.5, "Jarak SL maksimal (x ATR)", minval=0.1, step=0.1, group=grpR)
+tp1R       = input.float(1.0, "TP1 (R)", minval=0.1, step=0.1, group=grpR)
+tp2R       = input.float(2.0, "TP2 (R)", minval=0.1, step=0.1, group=grpR)
+tp1Frac    = input.float(0.5, "Bagian posisi ditutup di TP1", minval=0.0, maxval=1.0, step=0.1, group=grpR)
+exitOnFail = input.bool(true, "Keluar bila close kembali ke dalam kotak", group=grpR)
+timeExit   = input.int(12, "Keluar bila TP1 belum kena setelah (candle)", minval=1, group=grpR)
+runnerMax  = input.int(48, "Sisa posisi ditutup setelah (candle)", minval=1, group=grpR)
+
+grpA = "5. Akun & batas harian"
+equity       = input.float(1000, "Modal ($)", minval=1, group=grpA)
+riskPct      = input.float(1.0, "Risiko per posisi (%)", minval=0.1, step=0.1, group=grpA)
+contract     = input.float(100, "Ukuran kontrak (oz per 1 lot)", minval=1, group=grpA)
+maxTradesDay = input.int(3, "Maks posisi per hari", minval=1, group=grpA)
+maxLossDay   = input.int(2, "Berhenti setelah kalah (kali per hari)", minval=1, group=grpA)
+
+grpD = "6. Tampilan"
+showTable = input.bool(true, "Tampilkan panel statistik", group=grpD)
+
+// ============================== TREN M30 ==============================
+f_trend() =>
+    e = ta.ema(close, emaLen)
+    [close[1], e[1], e[1 + slopeLb]]
+
+[c30, e30, e30Prev] = request.security(syminfo.tickerid, trendTf, f_trend(), lookahead=barmerge.lookahead_on)
+trendUp = c30 > e30 and e30 > e30Prev
+trendDn = c30 < e30 and e30 < e30Prev
+plot(showEma ? e30 : na, "EMA tren M30", color=trendUp ? color.new(color.teal, 0) : trendDn ? color.new(color.red, 0) : color.gray, linewidth=2, style=plot.style_stepline)
+
+atrV   = ta.atr(atrLen)
+inSess = not useSess or not na(time(timeframe.period, sessStr, sessTz))
+
+// ============================== DETEKSI POLA ==============================
+// d = 1 BUY, -1 SELL. Hasil: [ketemu, panjang kotak, atas kotak, bawah kotak]
+f_detect(int d) =>
+    bool  found = false
+    int   bLen  = na
+    float bHi   = na
+    float bLo   = na
+    rng = high - low
+    okCandle = rng > 0 and math.abs(close - open) >= bodyMin * rng and rng <= maxBoAtr * atrV and (close - open) * d > 0
+    if okCandle and bar_index > consMax + impMaxBars + 2
+        for n = consMin to consMax
+            if found
+                break
+            float cHi = high[1]
+            float cLo = low[1]
+            for j = 2 to n
+                cHi := math.max(cHi, high[j])
+                cLo := math.min(cLo, low[j])
+            bool brk = d == 1 ? close > cHi : close < cLo
+            if brk
+                int   e    = n + 1              // offset candle terakhir impuls
+                float iHi  = high[e]
+                float iLo  = low[e]
+                int   oHi  = e
+                int   oLo  = e
+                float aImp = atrV[e]
+                for k = 1 to impMaxBars
+                    int jj = e + k - 1          // perluas jendela impuls ke belakang
+                    if high[jj] > iHi
+                        iHi := high[jj]
+                        oHi := jj
+                    if low[jj] < iLo
+                        iLo := low[jj]
+                        oLo := jj
+                    float mv = iHi - iLo
+                    if mv >= impMult * aImp and not found
+                        // offset lebih besar = candle lebih lama
+                        bool ordered = d == 1 ? (oLo > oHi or (oLo == oHi and close[jj] > open[jj])) : (oHi > oLo or (oLo == oHi and close[jj] < open[jj]))
+                        bool okBox   = d == 1 ? (cHi <= iHi and iHi - cLo <= maxRetr * mv) : (cLo >= iLo and cHi - iLo <= maxRetr * mv)
+                        if ordered and okBox
+                            found := true
+                            bLen  := n
+                            bHi   := cHi
+                            bLo   := cLo
+    [found, bLen, bHi, bLo]
+
+// ============================== STATE ==============================
+var int   tradesToday = 0
+var int   lossesToday = 0
+newDay = dayofmonth(time, sessTz) != dayofmonth(time[1], sessTz)
+if newDay
+    tradesToday := 0
+    lossesToday := 0
+
+// sinyal menunggu (masuk di open candle berikutnya)
+var int   pDir  = 0
+var float pHi   = na
+var float pLo   = na
+var float pAtr  = na
+
+// posisi terbuka
+var int   tDir     = 0
+var float tEntry   = na
+var float tSl      = na
+var float tSl0     = na
+var float tRisk    = na
+var float tTp1     = na
+var float tTp2     = na
+var float tBoxHi   = na
+var float tBoxLo   = na
+var int   tEntryBi = na
+var bool  tTp1Hit  = false
+var float tLot     = na
+var line  lnEntry  = na
+var line  lnSl     = na
+var line  lnTp1    = na
+var line  lnTp2    = na
+
+// statistik
+var int   stTrades = 0
+var int   stWins   = 0
+var float stSumR   = 0.0
+var float stSumWin = 0.0
+var float stSumLoss = 0.0
+var int   stLosses = 0
+
+// ---------- 1) buka posisi dari sinyal candle sebelumnya ----------
+if pDir != 0
+    float entry = open
+    float sl    = pDir == 1 ? pLo - slBuf * pAtr : pHi + slBuf * pAtr
+    float risk  = (entry - sl) * pDir
+    if risk <= 0 or risk > maxSlAtr * pAtr
+        label.new(bar_index, pDir == 1 ? low : high, "Lewati\nSL terlalu lebar", style=pDir == 1 ? label.style_label_up : label.style_label_down, color=color.new(color.gray, 20), textcolor=color.white, size=size.tiny)
+    else
+        tDir     := pDir
+        tEntry   := entry
+        tSl      := sl
+        tSl0     := sl
+        tRisk    := risk
+        tTp1     := entry + pDir * tp1R * risk
+        tTp2     := entry + pDir * tp2R * risk
+        tBoxHi   := pHi
+        tBoxLo   := pLo
+        tEntryBi := bar_index
+        tTp1Hit  := false
+        tLot     := math.floor(equity * riskPct / 100 / (risk * contract) * 100 + 1e-9) / 100
+        tradesToday += 1
+        lnEntry := line.new(bar_index, entry, bar_index + 1, entry, color=color.blue, width=2)
+        lnSl    := line.new(bar_index, sl, bar_index + 1, sl, color=color.red, width=2)
+        lnTp1   := line.new(bar_index, tTp1, bar_index + 1, tTp1, color=color.new(color.green, 30), style=line.style_dashed)
+        lnTp2   := line.new(bar_index, tTp2, bar_index + 1, tTp2, color=color.green, width=2)
+        string lotTxt = tLot < 0.01 ? "modal kurang (< 0,01 lot)" : str.tostring(tLot, "#.##") + " lot"
+        string txt = (pDir == 1 ? "BUY " : "SELL ") + str.tostring(entry, format.mintick) + "\nSL " + str.tostring(sl, format.mintick) + "\nTP1 " + str.tostring(tTp1, format.mintick) + " | TP2 " + str.tostring(tTp2, format.mintick) + "\n" + lotTxt
+        label.new(bar_index, pDir == 1 ? low : high, txt, style=pDir == 1 ? label.style_label_up : label.style_label_down, color=pDir == 1 ? color.new(color.green, 0) : color.new(color.red, 0), textcolor=color.white, size=size.small)
+        alert(txt, alert.freq_once_per_bar)
+    pDir := 0
+
+// ---------- 2) kelola posisi terbuka ----------
+if tDir != 0
+    int   barsIn = bar_index - tEntryBi + 1
+    float exitPx = na
+    string why   = ""
+    float fav = tDir == 1 ? high : low
+    float adv = tDir == 1 ? low : high
+    if (adv - tSl) * tDir <= 0
+        exitPx := tSl
+        why    := tTp1Hit ? "BE" : "SL"
+    else if not tTp1Hit and (fav - tTp1) * tDir >= 0
+        tTp1Hit := true
+        tSl     := tEntry
+        line.set_y1(lnSl, tEntry)
+        line.set_y2(lnSl, tEntry)
+        line.set_color(lnSl, color.gray)
+        label.new(bar_index, tTp1, "TP1 +" + str.tostring(tp1R * tp1Frac, "#.##") + "R\nSL -> BE", style=label.style_label_left, color=color.new(color.green, 40), textcolor=color.white, size=size.tiny)
+    else if tTp1Hit and (fav - tTp2) * tDir >= 0
+        exitPx := tTp2
+        why    := "TP2"
+    if na(exitPx)
+        bool backInside = tDir == 1 ? close <= tBoxHi : close >= tBoxLo
+        if exitOnFail and not tTp1Hit and backInside
+            exitPx := close
+            why    := "Gagal breakout"
+        else if not tTp1Hit and barsIn >= timeExit
+            exitPx := close
+            why    := "Waktu habis"
+        else if tTp1Hit and barsIn >= runnerMax
+            exitPx := close
+            why    := "Waktu habis"
+    line.set_x2(lnEntry, bar_index)
+    line.set_x2(lnSl, bar_index)
+    line.set_x2(lnTp1, bar_index)
+    line.set_x2(lnTp2, bar_index)
+    if not na(exitPx)
+        float rRes = ((tTp1Hit ? tp1Frac * tp1R * tRisk : 0.0) + (tTp1Hit ? 1 - tp1Frac : 1.0) * (exitPx - tEntry) * tDir) / tRisk
+        stTrades += 1
+        stSumR   += rRes
+        if rRes > 0
+            stWins   += 1
+            stSumWin += rRes
+        if rRes < 0
+            stLosses  += 1
+            stSumLoss += rRes
+            lossesToday += 1
+        label.new(bar_index, exitPx, why + " " + (rRes >= 0 ? "+" : "") + str.tostring(rRes, "#.##") + "R", style=label.style_label_left, color=rRes > 0 ? color.new(color.green, 20) : rRes < 0 ? color.new(color.red, 20) : color.new(color.gray, 20), textcolor=color.white, size=size.tiny)
+        tDir := 0
+
+// ---------- 3) cari sinyal baru di close candle ini ----------
+canTrade = barstate.isconfirmed and tDir == 0 and pDir == 0 and inSess and tradesToday < maxTradesDay and lossesToday < maxLossDay
+[fL, nL, hL, lL] = f_detect(1)
+[fS, nS, hS, lS] = f_detect(-1)
+sigLong  = canTrade and trendUp and fL
+sigShort = canTrade and trendDn and fS
+
+if sigLong or sigShort
+    int   n  = sigLong ? nL : nS
+    float bh = sigLong ? hL : hS
+    float bl = sigLong ? lL : lS
+    box.new(bar_index - n, bh, bar_index - 1, bl, border_color=sigLong ? color.teal : color.red, bgcolor=sigLong ? color.new(color.teal, 85) : color.new(color.red, 85))
+    pDir := sigLong ? 1 : -1
+    pHi  := bh
+    pLo  := bl
+    pAtr := atrV
+
+plotshape(sigLong, "Sinyal BUY", shape.triangleup, location.belowbar, color.teal, size=size.tiny)
+plotshape(sigShort, "Sinyal SELL", shape.triangledown, location.abovebar, color.red, size=size.tiny)
+alertcondition(sigLong, "Flag Breakout BUY", "XAU Flag Breakout BUY: masuk di open candle berikutnya")
+alertcondition(sigShort, "Flag Breakout SELL", "XAU Flag Breakout SELL: masuk di open candle berikutnya")
+
+// ============================== PANEL ==============================
+var table tbl = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 20), border_width=1)
+if showTable and barstate.islast
+    float wr  = stTrades > 0 ? stWins * 100.0 / stTrades : 0.0
+    float exp = stTrades > 0 ? stSumR / stTrades : 0.0
+    float aw  = stWins > 0 ? stSumWin / stWins : 0.0
+    float al  = stLosses > 0 ? stSumLoss / stLosses : 0.0
+    table.cell(tbl, 0, 0, "Tren M30", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 0, trendUp ? "BUY saja" : trendDn ? "SELL saja" : "Netral", text_color=trendUp ? color.teal : trendDn ? color.red : color.gray, text_size=size.small)
+    table.cell(tbl, 0, 1, "Transaksi", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 1, str.tostring(stTrades), text_color=color.white, text_size=size.small)
+    table.cell(tbl, 0, 2, "Win rate", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 2, str.tostring(wr, "#.#") + "%", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 0, 3, "Rata-rata menang / kalah", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 3, "+" + str.tostring(aw, "#.##") + "R / " + str.tostring(al, "#.##") + "R", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 0, 4, "Ekspektansi", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 4, str.tostring(exp, "#.###") + " R", text_color=exp > 0 ? color.teal : color.red, text_size=size.small)
+    table.cell(tbl, 0, 5, "Total", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 5, str.tostring(stSumR, "#.##") + " R", text_color=stSumR > 0 ? color.teal : color.red, text_size=size.small)
+    table.cell(tbl, 0, 6, "Catatan", text_color=color.gray, text_size=size.tiny)
+    table.cell(tbl, 1, 6, "tanpa spread, SL dulu jika SL & TP 1 candle", text_color=color.gray, text_size=size.tiny)
