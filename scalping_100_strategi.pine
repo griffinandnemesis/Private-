@@ -1,0 +1,615 @@
+//@version=5
+// 100 Strategi Scalping (TF 5 menit) — pilih strategi lewat input "Nomor Strategi".
+// Semua strategi memakai exit yang sama: SL = ATR x pengali, TP = SL x Risk:Reward.
+// Daftar lengkap aturan: STRATEGI_100.md
+strategy("100 Strategi Scalping", shorttitle="Scalp100", overlay=true,
+     initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=10,
+     commission_type=strategy.commission.percent, commission_value=0.0, slippage=0,
+     pyramiding=0)
+
+// ============================== INPUT ==============================
+stratNo    = input.int(1, "Nomor Strategi (1-100)", minval=1, maxval=100, group="Strategi")
+rr         = input.float(2.0, "Risk : Reward", options=[2.0, 3.0], group="Risiko")
+slMult     = input.float(1.5, "Stop Loss = ATR(14) x", minval=0.1, step=0.1, group="Risiko")
+allowLong  = input.bool(true, "Izinkan BUY", group="Risiko")
+allowShort = input.bool(true, "Izinkan SELL", group="Risiko")
+
+useSession = input.bool(true, "Hanya entry di jam sesi", group="Filter Umum")
+sessionStr = input.session("1400-2300", "Jam sesi (WIB)", group="Filter Umum", tooltip="14:00-23:00 WIB = sesi London + New York")
+useTrend   = input.bool(false, "Tambah filter EMA 200 ke semua strategi", group="Filter Umum")
+
+londonOR = input.session("1400-1415", "Opening range London (WIB)", group="Jam Range", tooltip="14:00 saat musim panas Eropa, 15:00 saat musim dingin")
+londonWin = input.session("1415-1800", "Jendela breakout London (WIB)", group="Jam Range")
+nyOR     = input.session("2030-2045", "Opening range New York (WIB)", group="Jam Range", tooltip="20:30 saat musim panas AS, 21:30 saat musim dingin")
+nyWin    = input.session("2045-2300", "Jendela breakout New York (WIB)", group="Jam Range")
+asiaSess = input.session("0700-1400", "Range sesi Asia (WIB)", group="Jam Range")
+asiaWin  = input.session("1400-1800", "Jendela breakout range Asia (WIB)", group="Jam Range")
+
+TZ = "Asia/Jakarta"
+
+// ============================== INDIKATOR ==============================
+atr = ta.atr(14)
+
+e4   = ta.ema(close, 4)
+e5   = ta.ema(close, 5)
+e8   = ta.ema(close, 8)
+e9   = ta.ema(close, 9)
+e13  = ta.ema(close, 13)
+e18  = ta.ema(close, 18)
+e20  = ta.ema(close, 20)
+e21  = ta.ema(close, 21)
+e50  = ta.ema(close, 50)
+e55  = ta.ema(close, 55)
+e200 = ta.ema(close, 200)
+s10  = ta.sma(close, 10)
+s20  = ta.sma(close, 20)
+s50  = ta.sma(close, 50)
+hma9  = ta.hma(close, 9)
+hma21 = ta.hma(close, 21)
+hma55 = ta.hma(close, 55)
+vwma20 = ta.vwma(close, 20)
+e20e   = ta.ema(e20, 20)
+e20ee  = ta.ema(e20e, 20)
+dema20 = 2 * e20 - e20e
+tema20 = 3 * e20 - 3 * e20e + e20ee
+zl     = ta.ema(close + (close - close[10]), 21)
+alma   = ta.alma(close, 21, 0.85, 6)
+lsma   = ta.linreg(close, 25, 0)
+vwapV  = ta.vwap(hlc3)
+
+up200 = close > e200
+dn200 = close < e200
+
+rsi2  = ta.rsi(close, 2)
+rsi7  = ta.rsi(close, 7)
+rsi14 = ta.rsi(close, 14)
+k = ta.sma(ta.stoch(close, high, low, 14), 3)
+d = ta.sma(k, 3)
+rsiK = ta.sma(ta.stoch(rsi14, rsi14, rsi14, 14), 3)
+rsiD = ta.sma(rsiK, 3)
+[macd, sig, hist] = ta.macd(close, 12, 26, 9)
+[macdF, sigF, histF] = ta.macd(close, 5, 13, 6)
+cci = ta.cci(close, 20)
+wpr = ta.wpr(14)
+mfi = ta.mfi(hlc3, 14)
+roc = ta.roc(close, 9)
+mom = ta.mom(close, 10)
+cmo = ta.cmo(close, 14)
+tsi = ta.tsi(close, 13, 25)
+tsiSig = ta.ema(tsi, 7)
+ao = ta.sma(hl2, 5) - ta.sma(hl2, 34)
+
+[bbM, bbU, bbL] = ta.bb(close, 20, 2)
+[kcM, kcU, kcL] = ta.kc(close, 20, 1.5)
+sqzOn = bbL > kcL and bbU < kcU
+sqzVal = ta.linreg(close - math.avg(math.avg(ta.highest(high, 20), ta.lowest(low, 20)), s20), 20, 0)
+dcU10 = ta.highest(high, 10)[1]
+dcL10 = ta.lowest(low, 10)[1]
+dcU20 = ta.highest(high, 20)[1]
+dcL20 = ta.lowest(low, 20)[1]
+dcU55 = ta.highest(high, 55)[1]
+dcL55 = ta.lowest(low, 55)[1]
+z = (close - s20) / ta.stdev(close, 20)
+
+[diP, diM, adx] = ta.dmi(14, 14)
+[st1, dir1] = ta.supertrend(3, 10)
+[st2, dir2] = ta.supertrend(2, 7)
+psar = ta.sar(0.02, 0.02, 0.2)
+
+donMid(len) => math.avg(ta.highest(high, len), ta.lowest(low, len))
+tenkan = donMid(9)
+kijun  = donMid(26)
+spanA  = math.avg(tenkan, kijun)
+spanB  = donMid(52)
+cloudTop = math.max(spanA[25], spanB[25])
+cloudBot = math.min(spanA[25], spanB[25])
+
+haC = ohlc4
+var float haO = na
+haO := na(haO[1]) ? (open + close) / 2 : (haO[1] + haC[1]) / 2
+haStrongBull = haC > haO and low >= haO
+haStrongBear = haC < haO and high <= haO
+
+aroonUp = 100 * (ta.highestbars(high, 15) + 15) / 15
+aroonDn = 100 * (ta.lowestbars(low, 15) + 15) / 15
+trSum = math.sum(ta.tr(true), 14)
+viP = math.sum(math.abs(high - low[1]), 14) / trSum
+viM = math.sum(math.abs(low - high[1]), 14) / trSum
+bullP = high - e13
+bearP = low - e13
+obvV = ta.obv
+obvE = ta.ema(obvV, 20)
+volAvg = ta.sma(volume, 20)
+
+// Pola candle
+body = math.abs(close - open)
+bullEng = close > open and close[1] < open[1] and close >= open[1] and open <= close[1]
+bearEng = close < open and close[1] > open[1] and close <= open[1] and open >= close[1]
+bullPin = high > low and math.min(open, close) - low >= 2 * body and high - math.max(open, close) <= body
+bearPin = high > low and high - math.max(open, close) >= 2 * body and math.min(open, close) - low <= body
+rng = high - low
+lowR7 = ta.lowest(rng, 7)
+nr7 = rng[1] <= lowR7[1]
+soldiers = close > open and close[1] > open[1] and close[2] > open[2] and close > close[1] and close[1] > close[2]
+crows    = close < open and close[1] < open[1] and close[2] < open[2] and close < close[1] and close[1] < close[2]
+
+// Fractal Williams
+upFr = high[2] > high[3] and high[2] > high[4] and high[2] > high[1] and high[2] > high
+dnFr = low[2] < low[3] and low[2] < low[4] and low[2] < low[1] and low[2] < low
+var float lastFH = na
+var float lastFL = na
+if upFr
+    lastFH := high[2]
+if dnFr
+    lastFL := low[2]
+
+// Level harian & timeframe besar
+[pdh, pdl, pdc] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]], lookahead=barmerge.lookahead_on)
+pp = (pdh + pdl + pdc) / 3
+r1 = 2 * pp - pdl
+s1 = 2 * pp - pdh
+h1e50  = request.security(syminfo.tickerid, "60", ta.ema(close, 50)[1], lookahead=barmerge.lookahead_on)
+m15e21 = request.security(syminfo.tickerid, "15", ta.ema(close, 21)[1], lookahead=barmerge.lookahead_on)
+
+// Range sesi
+inSess(s) => not na(time(timeframe.period, s, TZ))
+rangeHL(s) =>
+    inS = inSess(s)
+    var float hh = na
+    var float ll = na
+    if inS and not inS[1]
+        hh := high
+        ll := low
+    else if inS
+        hh := math.max(hh, high)
+        ll := math.min(ll, low)
+    [hh, ll]
+[lonH, lonL] = rangeHL(londonOR)
+[nyH, nyL]   = rangeHL(nyOR)
+[asH, asL]   = rangeHL(asiaSess)
+inLonWin  = inSess(londonWin)
+inNyWin   = inSess(nyWin)
+inAsiaWin = inSess(asiaWin)
+
+// Kombinasi
+bullRib = e8 > e21 and e21 > e55
+bearRib = e8 < e21 and e21 < e55
+bull3 = e4 > e9 and e9 > e18
+bear3 = e4 < e9 and e9 < e18
+confBull = e9 > e21 and macd > sig and rsi14 > 50 and close > vwapV
+confBear = e9 < e21 and macd < sig and rsi14 < 50 and close < vwapV
+atrAvg = ta.sma(atr, 50)
+
+// ============================== ATURAN 100 STRATEGI ==============================
+bool L = false
+bool S = false
+switch stratNo
+    1 =>
+        L := e9 > e21 and e9[1] <= e21[1]
+        S := e9 < e21 and e9[1] >= e21[1]
+    2 =>
+        L := e9 > e21 and e9[1] <= e21[1] and up200
+        S := e9 < e21 and e9[1] >= e21[1] and dn200
+    3 =>
+        L := e5 > e13 and e5[1] <= e13[1] and close > e50
+        S := e5 < e13 and e5[1] >= e13[1] and close < e50
+    4 =>
+        L := bullRib and not bullRib[1]
+        S := bearRib and not bearRib[1]
+    5 =>
+        L := e20 > e50 and low <= e20 and close > e20 and close > open
+        S := e20 < e50 and high >= e20 and close < e20 and close < open
+    6 =>
+        L := up200 and e50 > e200 and low <= e50 and close > e50 and close > open
+        S := dn200 and e50 < e200 and high >= e50 and close < e50 and close < open
+    7 =>
+        L := bull3 and not bull3[1]
+        S := bear3 and not bear3[1]
+    8 =>
+        L := s10 > s20 and s10[1] <= s20[1]
+        S := s10 < s20 and s10[1] >= s20[1]
+    9 =>
+        L := s20 > s50 and s20[1] <= s50[1]
+        S := s20 < s50 and s20[1] >= s50[1]
+    10 =>
+        L := hma9 > hma21 and hma9[1] <= hma21[1]
+        S := hma9 < hma21 and hma9[1] >= hma21[1]
+    11 =>
+        L := hma55 > hma55[1] and hma55[1] <= hma55[2]
+        S := hma55 < hma55[1] and hma55[1] >= hma55[2]
+    12 =>
+        L := close > dema20 and close[1] <= dema20[1] and up200
+        S := close < dema20 and close[1] >= dema20[1] and dn200
+    13 =>
+        L := close > tema20 and close[1] <= tema20[1] and close > e50
+        S := close < tema20 and close[1] >= tema20[1] and close < e50
+    14 =>
+        L := close > zl and close[1] <= zl[1]
+        S := close < zl and close[1] >= zl[1]
+    15 =>
+        L := close > alma and close[1] <= alma[1] and up200
+        S := close < alma and close[1] >= alma[1] and dn200
+    16 =>
+        L := lsma > lsma[1] and lsma[1] <= lsma[2] and close > e50
+        S := lsma < lsma[1] and lsma[1] >= lsma[2] and close < e50
+    17 =>
+        L := vwma20 > e20 and vwma20[1] <= e20[1] and close > e50
+        S := vwma20 < e20 and vwma20[1] >= e20[1] and close < e50
+    18 =>
+        L := close > vwapV and close[1] <= vwapV[1] and up200
+        S := close < vwapV and close[1] >= vwapV[1] and dn200
+    19 =>
+        L := e9 > e21 and low <= vwapV and close > vwapV and close > open
+        S := e9 < e21 and high >= vwapV and close < vwapV and close < open
+    20 =>
+        L := close > vwapV and rsi14 > 50 and rsi14[1] <= 50
+        S := close < vwapV and rsi14 < 50 and rsi14[1] >= 50
+    21 =>
+        L := rsi14 > 50 and rsi14[1] <= 50 and up200
+        S := rsi14 < 50 and rsi14[1] >= 50 and dn200
+    22 =>
+        L := up200 and rsi2 < 10 and rsi2[1] >= 10
+        S := dn200 and rsi2 > 90 and rsi2[1] <= 90
+    23 =>
+        L := rsi7 > 30 and rsi7[1] <= 30 and close > e50
+        S := rsi7 < 70 and rsi7[1] >= 70 and close < e50
+    24 =>
+        L := rsi14 > 30 and rsi14[1] <= 30
+        S := rsi14 < 70 and rsi14[1] >= 70
+    25 =>
+        L := up200 and e21 > e50 and rsi14 > 40 and rsi14[1] <= 40
+        S := dn200 and e21 < e50 and rsi14 < 60 and rsi14[1] >= 60
+    26 =>
+        L := e9 > e21 and e9[1] <= e21[1] and rsi14 > 50
+        S := e9 < e21 and e9[1] >= e21[1] and rsi14 < 50
+    27 =>
+        L := k > d and k[1] <= d[1] and k[1] < 20
+        S := k < d and k[1] >= d[1] and k[1] > 80
+    28 =>
+        L := up200 and k > d and k[1] <= d[1] and k < 30
+        S := dn200 and k < d and k[1] >= d[1] and k > 70
+    29 =>
+        L := k > 20 and k[1] <= 20 and close > e50
+        S := k < 80 and k[1] >= 80 and close < e50
+    30 =>
+        L := rsiK > rsiD and rsiK[1] <= rsiD[1] and rsiK < 20 and close > e50
+        S := rsiK < rsiD and rsiK[1] >= rsiD[1] and rsiK > 80 and close < e50
+    31 =>
+        L := rsiK > 50 and rsiK[1] <= 50 and up200
+        S := rsiK < 50 and rsiK[1] >= 50 and dn200
+    32 =>
+        L := macd > sig and macd[1] <= sig[1]
+        S := macd < sig and macd[1] >= sig[1]
+    33 =>
+        L := macd > sig and macd[1] <= sig[1] and macd < 0 and up200
+        S := macd < sig and macd[1] >= sig[1] and macd > 0 and dn200
+    34 =>
+        L := macd > 0 and macd[1] <= 0
+        S := macd < 0 and macd[1] >= 0
+    35 =>
+        L := hist < 0 and hist > hist[1] and hist[1] < hist[2] and up200
+        S := hist > 0 and hist < hist[1] and hist[1] > hist[2] and dn200
+    36 =>
+        L := macdF > sigF and macdF[1] <= sigF[1] and close > e50
+        S := macdF < sigF and macdF[1] >= sigF[1] and close < e50
+    37 =>
+        L := macd > sig and macd[1] <= sig[1] and rsi14 > 50
+        S := macd < sig and macd[1] >= sig[1] and rsi14 < 50
+    38 =>
+        L := cci > 100 and cci[1] <= 100
+        S := cci < -100 and cci[1] >= -100
+    39 =>
+        L := cci > -100 and cci[1] <= -100 and up200
+        S := cci < 100 and cci[1] >= 100 and dn200
+    40 =>
+        L := cci > 0 and cci[1] <= 0 and close > e50
+        S := cci < 0 and cci[1] >= 0 and close < e50
+    41 =>
+        L := wpr > -80 and wpr[1] <= -80 and up200
+        S := wpr < -20 and wpr[1] >= -20 and dn200
+    42 =>
+        L := wpr > -20 and wpr[1] <= -20 and e21 > e50
+        S := wpr < -80 and wpr[1] >= -80 and e21 < e50
+    43 =>
+        L := mfi > 20 and mfi[1] <= 20 and close > e50
+        S := mfi < 80 and mfi[1] >= 80 and close < e50
+    44 =>
+        L := roc > 0 and roc[1] <= 0 and up200
+        S := roc < 0 and roc[1] >= 0 and dn200
+    45 =>
+        L := mom > 0 and mom[1] <= 0 and e21 > e21[1]
+        S := mom < 0 and mom[1] >= 0 and e21 < e21[1]
+    46 =>
+        L := cmo > -50 and cmo[1] <= -50 and up200
+        S := cmo < 50 and cmo[1] >= 50 and dn200
+    47 =>
+        L := tsi > tsiSig and tsi[1] <= tsiSig[1] and up200
+        S := tsi < tsiSig and tsi[1] >= tsiSig[1] and dn200
+    48 =>
+        L := ao > 0 and ao[1] <= 0
+        S := ao < 0 and ao[1] >= 0
+    49 =>
+        L := ao[1] > 0 and ao[2] > ao[1] and ao > ao[1]
+        S := ao[1] < 0 and ao[2] < ao[1] and ao < ao[1]
+    50 =>
+        L := up200 and low <= bbL and close > bbL
+        S := dn200 and high >= bbU and close < bbU
+    51 =>
+        L := close > bbU and close[1] <= bbU[1] and adx > 20
+        S := close < bbL and close[1] >= bbL[1] and adx > 20
+    52 =>
+        L := bbM > bbM[1] and low <= bbM and close > bbM and close > open
+        S := bbM < bbM[1] and high >= bbM and close < bbM and close < open
+    53 =>
+        L := sqzOn[1] and not sqzOn and close > kcM and mom > 0
+        S := sqzOn[1] and not sqzOn and close < kcM and mom < 0
+    54 =>
+        L := close[1] < bbL[1] and close > bbL
+        S := close[1] > bbU[1] and close < bbU
+    55 =>
+        L := close > kcU and close[1] <= kcU[1]
+        S := close < kcL and close[1] >= kcL[1]
+    56 =>
+        L := kcM > kcM[1] and low <= kcM and close > kcM and close > open
+        S := kcM < kcM[1] and high >= kcM and close < kcM and close < open
+    57 =>
+        L := close > dcU20 and close[1] <= dcU20[1]
+        S := close < dcL20 and close[1] >= dcL20[1]
+    58 =>
+        L := close > dcU10 and close[1] <= dcU10[1] and up200
+        S := close < dcL10 and close[1] >= dcL10[1] and dn200
+    59 =>
+        L := close > dcU55 and close[1] <= dcU55[1]
+        S := close < dcL55 and close[1] >= dcL55[1]
+    60 =>
+        L := diP > diM and diP[1] <= diM[1] and adx > 20
+        S := diP < diM and diP[1] >= diM[1] and adx > 20
+    61 =>
+        L := adx > 25 and adx > adx[1] and e9 > e21 and close > e9 and close[1] <= e9[1]
+        S := adx > 25 and adx > adx[1] and e9 < e21 and close < e9 and close[1] >= e9[1]
+    62 =>
+        L := dir1 < 0 and dir1[1] > 0
+        S := dir1 > 0 and dir1[1] < 0
+    63 =>
+        L := dir2 < 0 and dir2[1] > 0 and up200
+        S := dir2 > 0 and dir2[1] < 0 and dn200
+    64 =>
+        L := dir1 < 0 and dir2 < 0 and (dir1[1] > 0 or dir2[1] > 0)
+        S := dir1 > 0 and dir2 > 0 and (dir1[1] < 0 or dir2[1] < 0)
+    65 =>
+        L := dir1 < 0 and rsi14 > 50 and rsi14[1] <= 50
+        S := dir1 > 0 and rsi14 < 50 and rsi14[1] >= 50
+    66 =>
+        L := psar < close and psar[1] > close[1] and up200
+        S := psar > close and psar[1] < close[1] and dn200
+    67 =>
+        L := psar < close and psar[1] > close[1] and macd > sig
+        S := psar > close and psar[1] < close[1] and macd < sig
+    68 =>
+        L := tenkan > kijun and tenkan[1] <= kijun[1] and close > cloudTop
+        S := tenkan < kijun and tenkan[1] >= kijun[1] and close < cloudBot
+    69 =>
+        L := close > cloudTop and close[1] <= cloudTop[1]
+        S := close < cloudBot and close[1] >= cloudBot[1]
+    70 =>
+        L := close > cloudTop and low <= kijun and close > kijun and close > open
+        S := close < cloudBot and high >= kijun and close < kijun and close < open
+    71 =>
+        L := haC > haO and haC[1] <= haO[1] and close > e50
+        S := haC < haO and haC[1] >= haO[1] and close < e50
+    72 =>
+        L := haStrongBull and not haStrongBull[1] and close > e21
+        S := haStrongBear and not haStrongBear[1] and close < e21
+    73 =>
+        L := aroonUp > aroonDn and aroonUp[1] <= aroonDn[1] and aroonUp > 70
+        S := aroonDn > aroonUp and aroonDn[1] <= aroonUp[1] and aroonDn > 70
+    74 =>
+        L := viP > viM and viP[1] <= viM[1]
+        S := viP < viM and viP[1] >= viM[1]
+    75 =>
+        L := e13 > e13[1] and bearP < 0 and bearP > bearP[1]
+        S := e13 < e13[1] and bullP > 0 and bullP < bullP[1]
+    76 =>
+        L := obvV > obvE and obvV[1] <= obvE[1] and close > e50
+        S := obvV < obvE and obvV[1] >= obvE[1] and close < e50
+    77 =>
+        L := volume > 2 * volAvg and close > open and close > high[1] and up200
+        S := volume > 2 * volAvg and close < open and close < low[1] and dn200
+    78 =>
+        L := sqzVal > 0 and sqzVal[1] <= 0 and up200
+        S := sqzVal < 0 and sqzVal[1] >= 0 and dn200
+    79 =>
+        L := z > -2 and z[1] <= -2
+        S := z < 2 and z[1] >= 2
+    80 =>
+        L := bullEng and up200
+        S := bearEng and dn200
+    81 =>
+        L := bullEng and low <= e21 and e21 > e50
+        S := bearEng and high >= e21 and e21 < e50
+    82 =>
+        L := bullPin and e20 > e50 and low <= e20
+        S := bearPin and e20 < e50 and high >= e20
+    83 =>
+        L := bullPin and low <= bbL
+        S := bearPin and high >= bbU
+    84 =>
+        L := high[1] < high[2] and low[1] > low[2] and close > high[1] and up200
+        S := high[1] < high[2] and low[1] > low[2] and close < low[1] and dn200
+    85 =>
+        L := nr7 and close > high[1] and e21 > e50
+        S := nr7 and close < low[1] and e21 < e50
+    86 =>
+        L := soldiers and not soldiers[1] and close > e50
+        S := crows and not crows[1] and close < e50
+    87 =>
+        L := up200 and e21 > e50 and close[1] < close[2] and close[2] < close[3] and close > high[1]
+        S := dn200 and e21 < e50 and close[1] > close[2] and close[2] > close[3] and close < low[1]
+    88 =>
+        L := close > lastFH and close[1] <= lastFH and e21 > e50
+        S := close < lastFL and close[1] >= lastFL and e21 < e50
+    89 =>
+        L := low > high[2] and close[1] > open[1] and up200
+        S := high < low[2] and close[1] < open[1] and dn200
+    90 =>
+        L := close > pdh and close[1] <= pdh
+        S := close < pdl and close[1] >= pdl
+    91 =>
+        L := low <= pp and close > pp and close > open and close > e50
+        S := high >= pp and close < pp and close < open and close < e50
+    92 =>
+        L := close > r1 and close[1] <= r1
+        S := close < s1 and close[1] >= s1
+    93 =>
+        L := inLonWin and close > lonH and close[1] <= lonH
+        S := inLonWin and close < lonL and close[1] >= lonL
+    94 =>
+        L := inNyWin and close > nyH and close[1] <= nyH
+        S := inNyWin and close < nyL and close[1] >= nyL
+    95 =>
+        L := inAsiaWin and close > asH and close[1] <= asH
+        S := inAsiaWin and close < asL and close[1] >= asL
+    96 =>
+        L := close > h1e50 and e9 > e21 and e9[1] <= e21[1]
+        S := close < h1e50 and e9 < e21 and e9[1] >= e21[1]
+    97 =>
+        L := close > m15e21 and rsi7 > 40 and rsi7[1] <= 40
+        S := close < m15e21 and rsi7 < 60 and rsi7[1] >= 60
+    98 =>
+        L := e50 > e200 and low <= e200 and close > e200 and close > open
+        S := e50 < e200 and high >= e200 and close < e200 and close < open
+    99 =>
+        L := confBull and not confBull[1]
+        S := confBear and not confBear[1]
+    100 =>
+        bounceUp = (e9 > e21 and e9[1] <= e21[1]) or (low <= e9 and close > e9 and close > open)
+        bounceDn = (e9 < e21 and e9[1] >= e21[1]) or (high >= e9 and close < e9 and close < open)
+        active = atr > atrAvg * 0.8
+        L := up200 and e9 > e21 and close > vwapV and rsi14 > 50 and rsi14 < 70 and active and bounceUp
+        S := dn200 and e9 < e21 and close < vwapV and rsi14 < 50 and rsi14 > 30 and active and bounceDn
+
+// ============================== FILTER & ORDER ==============================
+sessionOk = not useSession or inSess(sessionStr)
+buySignal  = L and allowLong  and sessionOk and (not useTrend or up200) and barstate.isconfirmed
+sellSignal = S and allowShort and sessionOk and (not useTrend or dn200) and barstate.isconfirmed
+
+slDist = atr * slMult
+if strategy.position_size == 0 and buySignal
+    strategy.entry("Buy", strategy.long)
+    strategy.exit("Exit Buy", from_entry="Buy", stop=close - slDist, limit=close + slDist * rr)
+if strategy.position_size == 0 and sellSignal
+    strategy.entry("Sell", strategy.short)
+    strategy.exit("Exit Sell", from_entry="Sell", stop=close + slDist, limit=close - slDist * rr)
+
+plotshape(buySignal,  "BUY",  shape.triangleup,   location.belowbar, color.green, size=size.tiny)
+plotshape(sellSignal, "SELL", shape.triangledown, location.abovebar, color.red,   size=size.tiny)
+
+// ============================== NAMA STRATEGI ==============================
+stratName(n) =>
+    switch n
+        1 => "EMA 9/21 Cross"
+        2 => "EMA 9/21 Cross + EMA 200"
+        3 => "EMA 5/13 Cross + EMA 50"
+        4 => "EMA 8/21/55 Ribbon"
+        5 => "EMA 20 Pullback"
+        6 => "EMA 50 Bounce + EMA 200"
+        7 => "Triple EMA 4/9/18"
+        8 => "SMA 10/20 Cross"
+        9 => "SMA 20/50 Cross"
+        10 => "HMA 9/21 Cross"
+        11 => "HMA 55 Turn"
+        12 => "DEMA 20 Cross + EMA 200"
+        13 => "TEMA 20 Cross + EMA 50"
+        14 => "ZLEMA 21 Cross"
+        15 => "ALMA 21 Cross + EMA 200"
+        16 => "LSMA 25 Turn + EMA 50"
+        17 => "VWMA 20 / EMA 20 Cross"
+        18 => "VWAP Cross + EMA 200"
+        19 => "VWAP Pullback"
+        20 => "VWAP + RSI 50"
+        21 => "RSI 14 Cross 50 + EMA 200"
+        22 => "RSI 2 Pullback (Connors)"
+        23 => "RSI 7 30/70 + EMA 50"
+        24 => "RSI 14 30/70 Reversal"
+        25 => "RSI 14 Pullback 40/60"
+        26 => "EMA 9/21 + RSI 50"
+        27 => "Stoch 14 Cross 20/80"
+        28 => "Stoch Cross + EMA 200"
+        29 => "Stoch Exit Zone + EMA 50"
+        30 => "Stoch RSI Cross + EMA 50"
+        31 => "Stoch RSI 50 + EMA 200"
+        32 => "MACD Signal Cross"
+        33 => "MACD Cross + EMA 200"
+        34 => "MACD Zero Cross"
+        35 => "MACD Histogram Turn"
+        36 => "MACD Fast 5/13/6"
+        37 => "MACD + RSI 50"
+        38 => "CCI 20 +/-100 Breakout"
+        39 => "CCI 20 Reversal + EMA 200"
+        40 => "CCI Zero + EMA 50"
+        41 => "Williams %R 80/20 + EMA 200"
+        42 => "Williams %R Momentum"
+        43 => "MFI 20/80 + EMA 50"
+        44 => "ROC 9 Zero + EMA 200"
+        45 => "Momentum 10 + EMA 21 Slope"
+        46 => "CMO 50 + EMA 200"
+        47 => "TSI Signal + EMA 200"
+        48 => "Awesome Osc Zero Cross"
+        49 => "Awesome Osc Saucer"
+        50 => "Bollinger Bounce + EMA 200"
+        51 => "Bollinger Breakout + ADX"
+        52 => "Bollinger Mid Pullback"
+        53 => "BB/Keltner Squeeze Breakout"
+        54 => "Bollinger Re-entry"
+        55 => "Keltner Breakout"
+        56 => "Keltner Mid Pullback"
+        57 => "Donchian 20 Breakout"
+        58 => "Donchian 10 + EMA 200"
+        59 => "Donchian 55 Breakout"
+        60 => "DMI Cross + ADX 20"
+        61 => "ADX 25 + EMA 9/21"
+        62 => "Supertrend 10/3 Flip"
+        63 => "Supertrend 7/2 + EMA 200"
+        64 => "Double Supertrend"
+        65 => "Supertrend + RSI 50"
+        66 => "Parabolic SAR + EMA 200"
+        67 => "Parabolic SAR + MACD"
+        68 => "Ichimoku TK Cross"
+        69 => "Ichimoku Kumo Breakout"
+        70 => "Ichimoku Kijun Bounce"
+        71 => "Heikin Ashi Flip + EMA 50"
+        72 => "Heikin Ashi Strong + EMA 21"
+        73 => "Aroon 15 Cross"
+        74 => "Vortex 14 Cross"
+        75 => "Elder Ray"
+        76 => "OBV / EMA 20 + EMA 50"
+        77 => "Volume Spike Breakout"
+        78 => "Squeeze Momentum + EMA 200"
+        79 => "Z-Score 2 Reversion"
+        80 => "Engulfing + EMA 200"
+        81 => "Engulfing at EMA 21"
+        82 => "Pin Bar at EMA 20"
+        83 => "Pin Bar at Bollinger"
+        84 => "Inside Bar Breakout + EMA 200"
+        85 => "NR7 Breakout"
+        86 => "3 Soldiers / 3 Crows + EMA 50"
+        87 => "3-Bar Pullback + EMA 200"
+        88 => "Fractal Breakout"
+        89 => "Fair Value Gap + EMA 200"
+        90 => "Previous Day High/Low Breakout"
+        91 => "Daily Pivot Bounce"
+        92 => "Pivot R1/S1 Breakout"
+        93 => "London Opening Range Breakout"
+        94 => "New York Opening Range Breakout"
+        95 => "Asian Range Breakout"
+        96 => "H1 EMA 50 + EMA 9/21"
+        97 => "M15 EMA 21 + RSI 7"
+        98 => "EMA 200 Retest"
+        99 => "Confluence EMA+MACD+RSI+VWAP"
+        100 => "Scalping Assistant"
+        => "-"
+
+var table info = table.new(position.top_right, 1, 2, bgcolor=color.new(color.black, 25))
+if barstate.islast
+    table.cell(info, 0, 0, "Strategi #" + str.tostring(stratNo), text_color=color.yellow, text_size=size.normal)
+    table.cell(info, 0, 1, stratName(stratNo) + "  |  RR 1:" + str.tostring(rr), text_color=color.white, text_size=size.small)

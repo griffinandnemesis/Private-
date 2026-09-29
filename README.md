@@ -7,6 +7,8 @@ Indikator ini memberi sinyal **BUY/SELL**, lalu otomatis menggambar **Stop Loss 
 |---|---|
 | `scalping_assistant_indicator.pine` | Indikator utama untuk trading sehari-hari: sinyal, garis SL/TP, panel info, dan alert |
 | `scalping_assistant_strategy.pine` | Versi backtest. Menguji strategi pada data masa lalu di *Strategy Tester* |
+| `scalping_100_strategi.pine` | 100 strategi scalping TF 5m dalam satu file. Pilih strategi lewat input "Nomor Strategi" |
+| `STRATEGI_100.md` | Daftar aturan ke-100 strategi dan tabel untuk mencatat hasil backtest |
 
 ---
 
