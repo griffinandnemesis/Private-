@@ -115,15 +115,18 @@ sessOk = not useSess or inSess
 var int lastSigBar = na
 coolOk = cooldown == 0 or na(lastSigBar) or bar_index - lastSigBar > cooldown
 
-longOk  = adxOk and volOk and sessOk and coolOk
-        and (not useEma  or close > emaVal)
-        and (not useRsi  or (rsiVal > 50 and rsiVal < rsiMax))
-        and (not useVwap or close > vwapVal)
+baseOk   = adxOk and volOk and sessOk and coolOk
 
-shortOk = adxOk and volOk and sessOk and coolOk
-        and (not useEma  or close < emaVal)
-        and (not useRsi  or (rsiVal < 50 and rsiVal > 100 - rsiMax))
-        and (not useVwap or close < vwapVal)
+emaLong  = not useEma  or close > emaVal
+rsiLong  = not useRsi  or (rsiVal > 50 and rsiVal < rsiMax)
+vwapLong = not useVwap or close > vwapVal
+
+emaShort  = not useEma  or close < emaVal
+rsiShort  = not useRsi  or (rsiVal < 50 and rsiVal > 100 - rsiMax)
+vwapShort = not useVwap or close < vwapVal
+
+longOk  = baseOk and emaLong and rsiLong and vwapLong
+shortOk = baseOk and emaShort and rsiShort and vwapShort
 
 // --- Sinyal ---
 flipUp   = dir == 1  and dir[1] == -1
