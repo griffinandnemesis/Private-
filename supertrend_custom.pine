@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 indicator("Supertrend Custom", overlay=true)
 
 // === Input ===
@@ -9,8 +9,10 @@ showSig  = input.bool(true, "Tampilkan sinyal Buy/Sell")
 fillBg   = input.bool(true, "Warnai area tren")
 
 // === Perhitungan ===
-atr = useRma ? ta.atr(atrLen) : ta.sma(ta.tr, atrLen)
-hl2v = (high + low) / 2
+atrRma = ta.atr(atrLen)
+atrSma = ta.sma(ta.tr, atrLen)
+atr    = useRma ? atrRma : atrSma
+hl2v   = (high + low) / 2
 
 upperBasic = hl2v + factor * atr
 lowerBasic = hl2v - factor * atr
