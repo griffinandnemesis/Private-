@@ -5,6 +5,7 @@
 //|  SELL : EMA9 cross down EMA21 dan harga di BAWAH VWAP            |
 //|  Filter tambahan: Trend Str (ADX 14 > batas, default 25)         |
 //|  SL = ATR(14) x multiplier, TP = kelipatan jarak SL (TP1..TP5)   |
+//|  Breakeven: SL digeser ke entry setelah harga mencapai TP1       |
 //+------------------------------------------------------------------+
 #property copyright "EA based on Sniper Entry/Exit indicator"
 #property version   "1.00"
@@ -22,6 +23,11 @@ input bool   InpCloseOpposite = true;      // Tutup posisi lawan saat sinyal bar
 input group "SL & TP (sama dengan indikator)"
 input double InpAtrMult       = 1.5;       // SL ATR Multiplier
 input int    InpTpLevel       = 2;         // TP memakai level ke- (1..5) x jarak SL
+
+input group "Breakeven"
+input bool   InpUseBE         = true;      // Geser SL ke breakeven setelah TP1
+input double InpBeTriggerR    = 1.0;       // Trigger: kelipatan jarak SL (1.0 = level TP1)
+input int    InpBeOffsetPts   = 0;         // Offset di atas/bawah entry (points) untuk tutup spread/komisi
 
 input group "Filter Trend Strength (Trend Str di dashboard)"
 input bool   InpUseAdx        = true;      // Hanya entry jika Trend Str = STRONG
@@ -149,8 +155,51 @@ double CalcLot(const double slDist)
    return NormalizeDouble(lot, 2);
   }
 //+------------------------------------------------------------------+
+//| Geser SL ke entry (+offset) saat harga mencapai level TP1.       |
+//| Jarak risiko awal dihitung dari TP: risk = |TP - open| / TpLevel |
+//+------------------------------------------------------------------+
+void ManageBreakeven()
+  {
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong tk = PositionGetTicket(i);
+      if(tk == 0) continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
+      if((ulong)PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
+
+      double open = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl   = PositionGetDouble(POSITION_SL);
+      double tp   = PositionGetDouble(POSITION_TP);
+      if(tp <= 0) continue;
+
+      double risk   = MathAbs(tp - open) / InpTpLevel;
+      double offset = InpBeOffsetPts * _Point;
+      double minDist = (SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) + 1) * _Point;
+      ENUM_POSITION_TYPE type = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
+      if(type == POSITION_TYPE_BUY)
+        {
+         double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         double newSl = NormalizeDouble(open + offset, _Digits);
+         if(bid >= open + risk * InpBeTriggerR && (sl == 0 || sl < newSl) && bid - newSl >= minDist)
+            if(!g_trade.PositionModify(tk, newSl, tp))
+               Print("Breakeven BUY gagal: ", g_trade.ResultRetcodeDescription());
+        }
+      else
+        {
+         double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         double newSl = NormalizeDouble(open - offset, _Digits);
+         if(ask <= open - risk * InpBeTriggerR && (sl == 0 || sl > newSl) && newSl - ask >= minDist)
+            if(!g_trade.PositionModify(tk, newSl, tp))
+               Print("Breakeven SELL gagal: ", g_trade.ResultRetcodeDescription());
+        }
+     }
+  }
+//+------------------------------------------------------------------+
 void OnTick()
   {
+   if(InpUseBE) ManageBreakeven();   // dicek setiap tick
+
    datetime bar = iTime(_Symbol, _Period, 0);
    if(bar == g_lastBar) return;      // proses sekali per bar baru
    g_lastBar = bar;
