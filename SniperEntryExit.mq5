@@ -562,10 +562,9 @@ void DrawDashboard(const double bullPct, const double bearPct, const string bias
       int vx = right ? mar + 6     : mar + w - 6;
       ENUM_ANCHOR_POINT aT = lower ? ANCHOR_LEFT_LOWER  : ANCHOR_LEFT_UPPER;
       ENUM_ANCHOR_POINT aV = lower ? ANCHOR_RIGHT_LOWER : ANCHOR_RIGHT_UPPER;
-      int ty = y + (lower ? 3 : 3);
+      int ty = y + 3;
       PutLabel(PFX "DT" + id, cn, t[r], tx, ty, aT, tc[r], fs);
       PutLabel(PFX "DV" + id, cn, v[r], vx, ty, aV, vc[r], fs);
      }
-  }
   }
 //+------------------------------------------------------------------+
