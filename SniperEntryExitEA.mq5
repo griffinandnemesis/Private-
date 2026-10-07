@@ -3,6 +3,7 @@
 //|  EA dari indikator "Sniper Entry/Exit with SL&TP"                |
 //|  BUY  : EMA9 cross up   EMA21 dan harga di ATAS  VWAP            |
 //|  SELL : EMA9 cross down EMA21 dan harga di BAWAH VWAP            |
+//|  Filter tambahan: Trend Str (ADX 14 > batas, default 25)         |
 //|  SL = ATR(14) x multiplier, TP = kelipatan jarak SL (TP1..TP5)   |
 //+------------------------------------------------------------------+
 #property copyright "EA based on Sniper Entry/Exit indicator"
@@ -21,6 +22,10 @@ input bool   InpCloseOpposite = true;      // Tutup posisi lawan saat sinyal bar
 input group "SL & TP (sama dengan indikator)"
 input double InpAtrMult       = 1.5;       // SL ATR Multiplier
 input int    InpTpLevel       = 2;         // TP memakai level ke- (1..5) x jarak SL
+
+input group "Filter Trend Strength (Trend Str di dashboard)"
+input bool   InpUseAdx        = true;      // Hanya entry jika Trend Str = STRONG
+input double InpAdxMin        = 25.0;      // ADX minimum (STRONG jika ADX > nilai ini)
 
 input group "Lainnya"
 input int    InpBars          = 1000;      // Jumlah bar historis untuk kalkulasi
@@ -62,6 +67,7 @@ int GetSignal(double &atr)
    double e9 = r[0].close, e21 = r[0].close, pe9 = e9, pe21 = e21;
    double a = r[0].high - r[0].low;
    double cpv = 0, cv = 0;
+   double sp = 0, sm = 0, adx = 0;   // smoothed +DM, -DM, ADX
 
    for(int i = 0; i < n; i++)
      {
@@ -74,6 +80,18 @@ int GetSignal(double &atr)
          double tr = MathMax(r[i].high - r[i].low,
                      MathMax(MathAbs(r[i].high - r[i - 1].close), MathAbs(r[i].low - r[i - 1].close)));
          a = Rma(a, tr, i + 1, LEN);
+
+         double up = r[i].high - r[i - 1].high;
+         double dn = r[i - 1].low - r[i].low;
+         double pdm = (up > dn && up > 0) ? up : 0;
+         double mdm = (dn > up && dn > 0) ? dn : 0;
+         sp = Rma(sp, pdm, i + 1, LEN);
+         sm = Rma(sm, mdm, i + 1, LEN);
+         double pl = (a > 0) ? 100.0 * sp / a : 0;
+         double mi = (a > 0) ? 100.0 * sm / a : 0;
+         double sum = pl + mi;
+         double dx = 100.0 * MathAbs(pl - mi) / (sum == 0 ? 1 : sum);
+         adx = Rma(adx, dx, i + 1, LEN);
         }
       bool newDay = (i == 0) || (r[i].time / 86400 != r[i - 1].time / 86400);
       double v = (double)r[i].tick_volume; if(v <= 0) v = 1;
@@ -85,6 +103,7 @@ int GetSignal(double &atr)
    double vwap = cpv / cv;
    double c = r[n - 1].close;
    atr = a;
+   if(InpUseAdx && adx <= InpAdxMin) return 0;   // Trend Str = WEAK, jangan entry
 
    bool buyCross  = (e9 > e21 && pe9 <= pe21);
    bool sellCross = (e9 < e21 && pe9 >= pe21);
