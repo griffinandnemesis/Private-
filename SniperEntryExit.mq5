@@ -45,12 +45,16 @@
 #property indicator_width7  1
 
 //--- inputs
+enum ENUM_DASH_POS { DASH_TR, DASH_TL, DASH_BR, DASH_BL };
 enum ENUM_TXT_SIZE { TXT_TINY, TXT_SMALL, TXT_NORMAL, TXT_LARGE, TXT_HUGE };
 
 input group "Visuals & UI"
 input ENUM_TXT_SIZE InpDashSize       = TXT_SMALL;   // Dashboard Font Size
 input ENUM_TXT_SIZE InpTradeSize      = TXT_SMALL;   // Trade Label Size
 input bool          InpShowDashboard  = true;        // Tampilkan Dashboard
+input ENUM_DASH_POS InpDashPos        = DASH_TL;     // Posisi Dashboard (pojok)
+input int           InpDashX          = 10;          // Dashboard offset X (px)
+input int           InpDashY          = 20;          // Dashboard offset Y (px)
 input bool          InpShowRibbon     = true;        // Tampilkan EMA Ribbon (fill)
 input bool          InpShowSignalText = true;        // Tampilkan teks BUY / SELL
 input bool          InpColorCandles   = true;        // Warnai candle signal/retest
@@ -468,17 +472,17 @@ void DrawTrade(const STrade &st, const datetime lastTime)
    PutText(PFX "TLSL", tx, st.sl,    "SL: "    + DoubleToString(st.sl, _Digits),    C_RED);
   }
 //+------------------------------------------------------------------+
-void PutRect(const string name, const int x, const int y, const int w, const int h, const color bg)
+void PutRect(const string name, const ENUM_BASE_CORNER corner, const int x, const int y, const int w, const int h, const color bg)
   {
    if(ObjectFind(0, name) < 0)
      {
       ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
       ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, name, OBJPROP_COLOR, C'170,170,170');
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
      }
+   ObjectSetInteger(0, name, OBJPROP_CORNER, corner);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
    ObjectSetInteger(0, name, OBJPROP_XSIZE, w);
@@ -486,17 +490,17 @@ void PutRect(const string name, const int x, const int y, const int w, const int
    ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg);
   }
 //+------------------------------------------------------------------+
-void PutLabel(const string name, const string txt, const int x, const int y,
+void PutLabel(const string name, const ENUM_BASE_CORNER corner, const string txt, const int x, const int y,
               const ENUM_ANCHOR_POINT anc, const color clr, const int fs)
   {
    if(ObjectFind(0, name) < 0)
      {
       ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
       ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
      }
+   ObjectSetInteger(0, name, OBJPROP_CORNER, corner);
    ObjectSetInteger(0, name, OBJPROP_ANCHOR, anc);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
@@ -513,7 +517,11 @@ void DrawDashboard(const double bullPct, const double bearPct, const string bias
    int fs = FontSize(InpDashSize);
    int rowH = fs * 2 + 6;
    int w = fs * 24;
-   int mar = 10, top = 20;
+   int mar = InpDashX, top = InpDashY;
+   bool right = (InpDashPos == DASH_TR || InpDashPos == DASH_BR);
+   bool lower = (InpDashPos == DASH_BR || InpDashPos == DASH_BL);
+   ENUM_BASE_CORNER cn = InpDashPos == DASH_TR ? CORNER_RIGHT_UPPER : InpDashPos == DASH_TL ? CORNER_LEFT_UPPER :
+                         InpDashPos == DASH_BR ? CORNER_RIGHT_LOWER : CORNER_LEFT_LOWER;
 
    string t[ROWS], v[ROWS];
    color  tc[ROWS], vc[ROWS], tb[ROWS], vb[ROWS];
@@ -543,12 +551,21 @@ void DrawDashboard(const double bullPct, const double bearPct, const string bias
 
    for(int r = 0; r < ROWS; r++)
      {
-      int y = top + r * rowH;
+      int y = top + (lower ? (ROWS - 1 - r) : r) * rowH;
       string id = IntegerToString(r);
-      PutRect(PFX "DRL" + id, mar + w / 2, y, w / 2, rowH, tb[r]);
-      PutRect(PFX "DRR" + id, mar,         y, w / 2, rowH, vb[r]);
-      PutLabel(PFX "DT" + id, t[r], mar + w - 6, y + 3, ANCHOR_LEFT_UPPER,  tc[r], fs);
-      PutLabel(PFX "DV" + id, v[r], mar + 6,     y + 3, ANCHOR_RIGHT_UPPER, vc[r], fs);
+      // sel kiri = judul, sel kanan = nilai (jarak diukur dari sudut yang dipilih)
+      int xT = right ? mar + w / 2 : mar;        // kiri secara visual
+      int xV = right ? mar         : mar + w / 2; // kanan secara visual
+      PutRect(PFX "DRL" + id, cn, xT, y, w / 2, rowH, tb[r]);
+      PutRect(PFX "DRR" + id, cn, xV, y, w / 2, rowH, vb[r]);
+      int tx = right ? mar + w - 6 : mar + 6;
+      int vx = right ? mar + 6     : mar + w - 6;
+      ENUM_ANCHOR_POINT aT = lower ? ANCHOR_LEFT_LOWER  : ANCHOR_LEFT_UPPER;
+      ENUM_ANCHOR_POINT aV = lower ? ANCHOR_RIGHT_LOWER : ANCHOR_RIGHT_UPPER;
+      int ty = y + (lower ? 3 : 3);
+      PutLabel(PFX "DT" + id, cn, t[r], tx, ty, aT, tc[r], fs);
+      PutLabel(PFX "DV" + id, cn, v[r], vx, ty, aV, vc[r], fs);
      }
+  }
   }
 //+------------------------------------------------------------------+
