@@ -52,6 +52,7 @@ input ENUM_TXT_SIZE InpDashSize       = TXT_SMALL;   // Dashboard Font Size
 input ENUM_TXT_SIZE InpTradeSize      = TXT_SMALL;   // Trade Label Size
 input bool          InpShowDashboard  = true;        // Tampilkan Dashboard
 input bool          InpShowRibbon     = true;        // Tampilkan EMA Ribbon (fill)
+input bool          InpShowSignalText = true;        // Tampilkan teks BUY / SELL
 input bool          InpColorCandles   = true;        // Warnai candle signal/retest
 input color         InpSignalBarColor = clrBlack;    // Warna candle signal
 input color         InpRetestBarColor = clrOrange;   // Warna candle retest
@@ -101,6 +102,7 @@ int      g_h5 = INVALID_HANDLE;
 datetime g_lastAlert = 0;
 
 //--- forward declarations
+void SignalText(const datetime t, const bool isBuy, const double price);
 void DrawTrade(const STrade &st, const datetime lastTime);
 void DrawDashboard(const double bullPct, const double bearPct, const string biasText,
                    const color biasCol, const double c, const double vw, const double rsi,
@@ -332,6 +334,13 @@ int OnCalculate(const int rates_total, const int prev_calculated,
       B_BUY[i]  = trigB ? low[i]  - atr * 0.3 : EMPTY_VALUE;
       B_SELL[i] = trigS ? high[i] + atr * 0.3 : EMPTY_VALUE;
 
+      if(InpShowSignalText)
+        {
+         if(trigB)       SignalText(time[i], true,  low[i]  - atr * 0.6);
+         else if(trigS)  SignalText(time[i], false, high[i] + atr * 0.6);
+         else if(isLast) ObjectDelete(0, PFX "SG" + IntegerToString((long)time[i]));
+        }
+
       bool retest = (st.sig == 1  && low[i]  <= e9 && low[i]  > e21) ||
                     (st.sig == -1 && high[i] >= e9 && high[i] < e21);
       if(InpColorCandles && (trigB || trigS || retest))
@@ -414,6 +423,23 @@ void PutText(const string name, const datetime t, const double p, const string t
    ObjectSetString(0, name, OBJPROP_TEXT, txt);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, FontSize(InpTradeSize));
+  }
+//+------------------------------------------------------------------+
+void SignalText(const datetime t, const bool isBuy, const double price)
+  {
+   string name = PFX "SG" + IntegerToString((long)t);
+   if(ObjectFind(0, name) < 0)
+     {
+      ObjectCreate(0, name, OBJ_TEXT, 0, t, price);
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+      ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
+     }
+   ObjectSetDouble(0, name, OBJPROP_PRICE, 0, price);
+   ObjectSetString(0, name, OBJPROP_TEXT, isBuy ? "BUY" : "SELL");
+   ObjectSetInteger(0, name, OBJPROP_COLOR, isBuy ? C_GRN : C_RED);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, FontSize(InpTradeSize));
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, isBuy ? ANCHOR_UPPER : ANCHOR_LOWER);
   }
 //+------------------------------------------------------------------+
 void DrawTrade(const STrade &st, const datetime lastTime)
